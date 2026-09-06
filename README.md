@@ -39,6 +39,8 @@ Sau khi cài, khởi động lại Pi (hoặc `/reload`) để extension đượ
 
 Khi có nhiều provider, Pi hiển thị model dạng `provider/model` (prefix native của Pi). File `models.json` luôn lưu **raw model id** — không đổi so với API gốc.
 
+> 💡 **Autocomplete:** gõ `/provider ` (có space) Pi sẽ gợi ý subcommand (`add`, `list`, `edit`, `delete`, `update-models`); gõ tiếp `/provider edit ` / `delete ` / `update-models ` sẽ gợi ý tên provider đã cấu hình.
+
 ## API modes
 
 | Giá trị | Mô tả |

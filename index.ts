@@ -2,11 +2,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   cmdAdd, cmdList, cmdEdit, cmdDelete, cmdUpdateModels, autoUpdateProviders, requireUI,
+  getProviderArgumentCompletions,
 } from "./commands.ts";
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("provider", {
     description: "Manage OpenAI-compatible providers: add, list, edit, delete, update-models",
+    getArgumentCompletions: (argumentPrefix) => getProviderArgumentCompletions(argumentPrefix),
     handler: async (args, ctx) => {
       const [sub, ...rest] = (args ?? "").trim().split(/\s+/);
       const name = rest.join(" ");

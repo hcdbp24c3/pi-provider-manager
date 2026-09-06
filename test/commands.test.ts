@@ -66,6 +66,30 @@ afterEach(() => {
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
 });
 
+describe("getProviderArgumentCompletions", () => {
+  test("empty prefix suggests all subcommands", async () => {
+    const items = await commands.getProviderArgumentCompletions("");
+    expect(items?.map((i) => i.value)).toEqual(["add", "list", "edit", "delete", "update-models"]);
+  });
+
+  test("partial subcommand prefix filters suggestions", async () => {
+    const items = await commands.getProviderArgumentCompletions("upd");
+    expect(items?.map((i) => i.value)).toEqual(["update-models"]);
+  });
+
+  test("name-taking subcommand suggests provider names", async () => {
+    const items = await commands.getProviderArgumentCompletions("edit ", MODELS_PATH);
+    expect(items?.map((i) => i.value)).toEqual(["alpha", "beta"]);
+    const filtered = await commands.getProviderArgumentCompletions("delete al", MODELS_PATH);
+    expect(filtered?.map((i) => i.value)).toEqual(["alpha"]);
+  });
+
+  test("add subcommand returns no name suggestions", async () => {
+    const items = await commands.getProviderArgumentCompletions("add ");
+    expect(items).toBeNull();
+  });
+});
+
 describe("cmdList", () => {
   test("shows provider list via select dialog (no count-only notify)", async () => {
     const ctx: any = makeCtx();

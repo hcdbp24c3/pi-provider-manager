@@ -15,6 +15,41 @@ export const API_MODES: Array<{ value: ApiMode; label: string }> = [
   { value: "google-generative-ai", label: "Google Gemini" },
 ];
 
+const SUBCOMMANDS: Array<{ value: string; label: string; description: string }> = [
+  { value: "add", label: "add", description: "Add a new provider (wizard)" },
+  { value: "list", label: "list", description: "List providers and view details" },
+  { value: "edit", label: "edit", description: "Edit a provider" },
+  { value: "delete", label: "delete", description: "Delete a provider" },
+  { value: "update-models", label: "update-models", description: "Refresh model list (all or one)" },
+];
+
+const NAME_SUBCOMMANDS = new Set(["edit", "delete", "rm", "remove", "update-models", "refresh"]);
+
+/** Argument completions for /provider — suggests subcommands, then provider names. */
+export async function getProviderArgumentCompletions(argumentPrefix: string, filePath?: string) {
+  const trimmed = argumentPrefix.trimStart();
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  const sub = parts[0] ?? "";
+  const rest = parts.slice(1).join(" ");
+
+  // No subcommand yet → suggest subcommands, filtered by what is typed
+  if (!trimmed.includes(" ")) {
+    return SUBCOMMANDS
+      .filter((c) => c.value.startsWith(trimmed))
+      .map((c) => ({ value: c.value, label: c.label, description: c.description }));
+  }
+
+  // Subcommand + space → suggest provider names for name-taking subcommands
+  if (NAME_SUBCOMMANDS.has(sub)) {
+    const file = loadModelsFile(filePath);
+    return Object.keys(file.providers)
+      .filter((n) => n.startsWith(rest))
+      .map((n) => ({ value: n, label: n, description: "Provider" }));
+  }
+
+  return null;
+}
+
 export function applyProvider(pi: ExtensionAPI, name: string, provider: ProviderConfig): void {
   pi.registerProvider(name, {
     name,
