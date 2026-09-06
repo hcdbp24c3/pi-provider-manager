@@ -1,6 +1,6 @@
 {
   "name": "@hcdbp24c3/pi-provider-manager",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Manage OpenAI-compatible providers for the Pi coding agent via /provider commands",
   "type": "module",
   "license": "MIT",

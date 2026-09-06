@@ -32,10 +32,10 @@ Sau khi cài, khởi động lại Pi (hoặc `/reload`) để extension đượ
 | Lệnh | Mô tả |
 |------|-------|
 | `/provider add <name>` | Thêm provider mới (wizard: API mode → base URL → API key → models) |
-| `/provider list` (hoặc `ls`) | Liệt kê provider: api mode, số model, base URL |
+| `/provider list` (hoặc `ls`) | Hiện danh sách provider (dialog) — chọn 1 provider để xem chi tiết (base URL, API key, danh sách model) |
 | `/provider edit <name>` | Sửa provider (đổi API mode/base URL/key, refetch models, sửa JSON tay) |
 | `/provider delete <name>` (hoặc `rm`) | Xóa provider |
-| `/provider update-models <name>` (hoặc `refresh`) | Fetch lại model list từ API |
+| `/provider update-models <name>` (hoặc `refresh`) | Fetch lại model list từ API. Không kèm tên → chọn provider, hoặc chọn `* All providers` để update toàn bộ |
 
 Khi có nhiều provider, Pi hiển thị model dạng `provider/model` (prefix native của Pi). File `models.json` luôn lưu **raw model id** — không đổi so với API gốc.
 

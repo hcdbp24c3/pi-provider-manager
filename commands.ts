@@ -35,6 +35,12 @@ export function requireUI(ctx: ExtensionCommandContext): boolean {
   return false;
 }
 
+/** Injectable dependencies for command handlers (used by tests). */
+export interface CommandDeps {
+  fetcher?: typeof fetchModels;
+  filePath?: string;
+}
+
 async function pickApiMode(ctx: ExtensionCommandContext, current?: ApiMode): Promise<ApiMode | undefined> {
   const choice = await ctx.ui.select(
     "API mode:",
@@ -129,17 +135,32 @@ export async function cmdAdd(pi: ExtensionAPI, nameArg: string, ctx: ExtensionCo
   ctx.ui.notify(`Added provider "${name}" (${models.length} models). Available in /model now.`, "info");
 }
 
-export async function cmdList(_pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
+export async function cmdList(_pi: ExtensionAPI, ctx: ExtensionCommandContext, deps: CommandDeps = {}): Promise<void> {
   if (!requireUI(ctx)) return;
-  const entries = listProviders(loadModelsFile());
+  const entries = listProviders(loadModelsFile(deps.filePath));
   if (entries.length === 0) {
     ctx.ui.notify("No providers configured. Use /provider add <name>.", "info");
     return;
   }
-  const lines = entries.map(({ name, provider }) =>
+  const labels = entries.map(({ name, provider }) =>
     `${name}  [${provider.api}]  ${provider.models?.length ?? 0} models  ${provider.baseUrl}`);
-  ctx.ui.setWidget("pi-provider-manager", lines);
-  ctx.ui.notify(`${entries.length} provider(s) configured.`, "info");
+  // Primary display: a select dialog (renders reliably in the TUI). Picking a provider shows its details.
+  ctx.ui.setWidget("pi-provider-manager", labels);
+  const choice = await ctx.ui.select("Providers:", labels);
+  if (!choice) return;
+  const idx = labels.indexOf(choice);
+  const entry = idx >= 0 ? entries[idx] : entries.find((e) => e.name === choice);
+  if (!entry) return;
+  const { name, provider } = entry;
+  const detailText = [
+    `Provider: ${name}`,
+    `API: ${provider.api}`,
+    `Base URL: ${provider.baseUrl}`,
+    `API key: ${provider.apiKey ? (provider.apiKey.startsWith("$") ? provider.apiKey : "(set)") : "(none)"}`,
+    `Models (${provider.models?.length ?? 0}):`,
+    ...(provider.models ?? []).map((m) => `  - ${m.id}`),
+  ].join("\n");
+  await ctx.ui.editor(`Provider "${name}" details (Esc to close):`, detailText);
 }
 
 export async function cmdEdit(pi: ExtensionAPI, nameArg: string, ctx: ExtensionCommandContext): Promise<void> {
@@ -209,29 +230,65 @@ export async function cmdDelete(pi: ExtensionAPI, nameArg: string, ctx: Extensio
   ctx.ui.notify(`Deleted provider "${name}".`, "info");
 }
 
-export async function cmdUpdateModels(pi: ExtensionAPI, nameArg: string, ctx: ExtensionCommandContext): Promise<void> {
+export async function cmdUpdateModels(
+  pi: ExtensionAPI,
+  nameArg: string,
+  ctx: ExtensionCommandContext,
+  deps: CommandDeps = {},
+): Promise<void> {
   if (!requireUI(ctx)) return;
-  const file = loadModelsFile();
+  const fetcher = deps.fetcher ?? fetchModels;
+  const file = loadModelsFile(deps.filePath);
   let name = nameArg.trim();
   if (!name) {
     const names = Object.keys(file.providers);
     if (names.length === 0) { ctx.ui.notify("No providers configured.", "info"); return; }
-    const choice = await ctx.ui.select("Provider:", names);
+    const choice = await ctx.ui.select("Provider:", ["* All providers", ...names]);
     if (!choice) return;
+    if (choice === "* All providers") {
+      await updateAllProviders(pi, ctx, deps);
+      return;
+    }
     name = choice;
   }
   const provider = file.providers[name];
   if (!provider) { ctx.ui.notify(`Provider "${name}" not found.`, "error"); return; }
   try {
-    const models = await fetchModels(provider.baseUrl, provider.apiKey, AbortSignal.timeout(15000));
+    const models = await fetcher(provider.baseUrl, provider.apiKey, AbortSignal.timeout(15000));
     if (models.length === 0) { ctx.ui.notify("No models returned; keeping existing list.", "warning"); return; }
     const updated = { ...provider, models };
-    saveModelsFile(updateProvider(file, name, updated));
+    saveModelsFile(updateProvider(file, name, updated), deps.filePath);
     applyProvider(pi, name, updated);
     ctx.ui.notify(`Updated "${name}": ${models.length} models.`, "info");
   } catch (err) {
     ctx.ui.notify(`Update failed: ${(err as Error).message}`, "error");
   }
+}
+
+async function updateAllProviders(pi: ExtensionAPI, ctx: ExtensionCommandContext, deps: CommandDeps): Promise<void> {
+  const fetcher = deps.fetcher ?? fetchModels;
+  const file = loadModelsFile(deps.filePath);
+  const entries = listProviders(file);
+  if (entries.length === 0) { ctx.ui.notify("No providers configured.", "info"); return; }
+  const working: ModelsFile = { providers: { ...file.providers } };
+  const ok: string[] = [];
+  const failed: string[] = [];
+  await Promise.allSettled(entries.map(async ({ name, provider }) => {
+    try {
+      const models = await fetcher(provider.baseUrl, provider.apiKey, AbortSignal.timeout(15000));
+      if (models.length === 0) throw new Error("no models returned");
+      working.providers[name] = { ...provider, models };
+      applyProvider(pi, name, working.providers[name]);
+      ok.push(name);
+    } catch {
+      failed.push(name);
+    }
+  }));
+  if (ok.length > 0) saveModelsFile(working, deps.filePath);
+  const summary = `Updated ${ok.length}/${entries.length} provider(s)`
+    + (ok.length ? `: ${ok.join(", ")}` : "")
+    + (failed.length ? `; failed: ${failed.join(", ")}` : "") + ".";
+  ctx.ui.notify(summary, failed.length ? "warning" : "info");
 }
 
 export async function autoUpdateProviders(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
