@@ -1,0 +1,22 @@
+{
+  "name": "@hcdbp24c3/pi-provider-manager",
+  "version": "0.1.0",
+  "description": "Manage OpenAI-compatible providers for the Pi coding agent via /provider commands",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi", "pi-extension", "openai", "provider", "models.json"],
+  "pi": { "extensions": ["./index.ts"] },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "bun-types": "latest",
+    "typescript": "^5.5.0"
+  }
+}
