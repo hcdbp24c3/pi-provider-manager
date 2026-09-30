@@ -171,4 +171,24 @@ describe("cmdUpdateModels", () => {
     expect(saved.providers.beta.models).toEqual([]); // unchanged
     expect(notified.some((n) => n.message.includes("Updated 1/2 provider(s)") && n.message.includes("failed: beta"))).toBe(true);
   });
+
+  test("refetch keeps provider compat and re-applies it to runtime models", async () => {
+    // Regression: an endpoint that rejects role "developer" needs compat.supportsDeveloperRole=false.
+    // A refetch must not drop it, and the re-registered provider must still carry it.
+    const file = JSON.parse(fs.readFileSync(MODELS_PATH, "utf8"));
+    file.providers.alpha.compat = { supportsDeveloperRole: false };
+    file.providers.alpha.models = [{ id: "a1", reasoning: true, compat: { supportsDeveloperRole: false } }];
+    fs.writeFileSync(MODELS_PATH, JSON.stringify(file, null, 2));
+    fetchResults = { "https://a.example.com/v1": [{ id: "a1" }, { id: "a2" }] };
+
+    const ctx: any = makeCtx();
+    await commands.cmdUpdateModels(fakePi, "alpha", ctx, { fetcher: mockFetcher, filePath: MODELS_PATH });
+
+    const saved = JSON.parse(fs.readFileSync(MODELS_PATH, "utf8"));
+    expect(saved.providers.alpha.compat).toEqual({ supportsDeveloperRole: false });
+    expect(saved.providers.alpha.models[0].compat).toEqual({ supportsDeveloperRole: false });
+    const runtime = applied.find((a) => a.name === "alpha")?.provider;
+    expect(runtime.models[0].compat).toEqual({ supportsDeveloperRole: false });
+    expect(runtime.models[1].compat).toEqual({ supportsDeveloperRole: false });
+  });
 });

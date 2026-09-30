@@ -3,6 +3,16 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
+/**
+ * Provider/model compatibility flags understood by Pi (mirrors pi-ai's ProviderCompatSchema).
+ * Unknown keys are passed through so new Pi flags keep working without a plugin update.
+ */
+export interface CompatFlags {
+  /** Send the system prompt as role "system" instead of "developer" (required by GLM, DeepSeek, relays). */
+  supportsDeveloperRole?: boolean;
+  [key: string]: unknown;
+}
+
 export interface ModelEntry {
   id: string;
   name?: string;
@@ -11,6 +21,7 @@ export interface ModelEntry {
   reasoning?: boolean;
   input?: string[];
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  compat?: CompatFlags;
 }
 
 export type ApiMode =
@@ -23,6 +34,8 @@ export interface ProviderConfig {
   baseUrl: string;
   api: ApiMode;
   apiKey?: string;
+  /** Applied to every model of this provider (models.json provider-level compat). */
+  compat?: CompatFlags;
   models?: ModelEntry[];
 }
 

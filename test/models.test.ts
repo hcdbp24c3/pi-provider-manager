@@ -1,5 +1,7 @@
 import { describe, test, expect } from "bun:test";
-import { normalizeInput, mapModel, defaultModel, buildProviderModels, fetchModels } from "../models.ts";
+import {
+  normalizeInput, mapModel, defaultModel, buildProviderModels, fetchModels, mergeFetchedModels,
+} from "../models.ts";
 
 test("normalizeInput", () => {
   expect(normalizeInput(["text", "image"])).toEqual(["text", "image"]);
@@ -30,6 +32,52 @@ test("defaultModel fills conservative defaults", () => {
 test("buildProviderModels fills defaults + cost", () => {
   const built = buildProviderModels([{ id: "m" }]);
   expect(built[0]).toEqual({ id: "m", name: "m", contextWindow: 128000, maxTokens: 16384, reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+});
+
+test("buildProviderModels omits compat when unset", () => {
+  expect("compat" in buildProviderModels([{ id: "m" }])[0]).toBe(false);
+});
+
+test("buildProviderModels keeps per-model compat", () => {
+  const built = buildProviderModels([{ id: "glm", compat: { supportsDeveloperRole: false } }]);
+  expect(built[0].compat).toEqual({ supportsDeveloperRole: false });
+});
+
+test("buildProviderModels merges provider-level compat into every model", () => {
+  const built = buildProviderModels([{ id: "a" }, { id: "b", compat: { supportsDeveloperRole: true } }], {
+    supportsDeveloperRole: false,
+  });
+  expect(built[0].compat).toEqual({ supportsDeveloperRole: false });
+  // per-model entry wins over the provider-level default
+  expect(built[1].compat).toEqual({ supportsDeveloperRole: true });
+});
+
+test("mapModel keeps compat returned by the API", () => {
+  expect(mapModel({ id: "m", compat: { supportsDeveloperRole: false } })?.compat).toEqual({
+    supportsDeveloperRole: false,
+  });
+  expect(mapModel({ id: "m", compat: "nope" })?.compat).toBeUndefined();
+});
+
+describe("mergeFetchedModels", () => {
+  test("preserves compat so a developer-role opt-out survives a refetch", () => {
+    const existing = [{ id: "glm-4.6", reasoning: true, compat: { supportsDeveloperRole: false } }];
+    const merged = mergeFetchedModels(existing, [{ id: "glm-4.6" }]);
+    expect(merged[0].compat).toEqual({ supportsDeveloperRole: false });
+  });
+
+  test("keeps manual fields the API does not report, prefers API values when present", () => {
+    const existing = [{ id: "m", contextWindow: 200000, input: ["text", "image"], name: "Manual" }];
+    const merged = mergeFetchedModels(existing, [{ id: "m", contextWindow: 128000, name: "API" }]);
+    expect(merged[0].contextWindow).toBe(128000); // API wins
+    expect(merged[0].name).toBe("API"); // API wins
+    expect(merged[0].input).toEqual(["text", "image"]); // API silent → manual kept
+  });
+
+  test("adds new ids and drops ids the API no longer returns", () => {
+    const merged = mergeFetchedModels([{ id: "old" }, { id: "keep" }], [{ id: "keep" }, { id: "new" }]);
+    expect(merged.map((m) => m.id)).toEqual(["keep", "new"]);
+  });
 });
 
 test("fetchModels parses /models response with Bearer auth", async () => {

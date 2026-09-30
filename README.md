@@ -31,7 +31,7 @@ Sau khi cài, khởi động lại Pi (hoặc `/reload`) để extension đượ
 
 | Lệnh | Mô tả |
 |------|-------|
-| `/provider add <name>` | Thêm provider mới (wizard: API mode → base URL → API key → models) |
+| `/provider add <name>` | Thêm provider mới (wizard: API mode → base URL → API key → instruction role → models) |
 | `/provider list` (hoặc `ls`) | Hiện danh sách provider (dialog) — chọn 1 provider để xem chi tiết (base URL, API key, danh sách model) |
 | `/provider edit <name>` | Sửa provider (đổi API mode/base URL/key, refetch models, sửa JSON tay) |
 | `/provider delete <name>` (hoặc `rm`) | Xóa provider |
@@ -61,6 +61,7 @@ Khi có nhiều provider, Pi hiển thị model dạng `provider/model` (prefix 
       "baseUrl": "https://api.example.com/v1",
       "api": "openai-completions",
       "apiKey": "$MY_PROVIDER_KEY",
+      "compat": { "supportsDeveloperRole": false },
       "models": [
         {
           "id": "gpt-4o",
@@ -76,7 +77,9 @@ Khi có nhiều provider, Pi hiển thị model dạng `provider/model` (prefix 
 ```
 
 - `apiKey` nhận 3 dạng: `$ENV_VAR` (tham chiếu biến môi trường), literal key, hoặc `!command` (lệnh sinh key).
-- `models[]` — mỗi entry: `id` (bắt buộc), `name?`, `contextWindow?`, `maxTokens?`, `reasoning?`, `input?` (`["text"]`/`["image"]`), `cost?`.
+- `models[]` — mỗi entry: `id` (bắt buộc), `name?`, `contextWindow?`, `maxTokens?`, `reasoning?`, `input?` (`["text"]`/`["image"]`), `cost?`, `compat?`.
+- `compat` (cấp provider hoặc cấp model) — cờ tương thích của Pi. `supportsDeveloperRole: false` buộc Pi gửi system prompt với role `system` thay vì `developer`; **bắt buộc với GLM/Z.AI, DeepSeek, Moonshot và hầu hết relay gateway** (xem Troubleshooting).
+- Cờ `compat` do người dùng đặt **không bị mất** khi `/provider update-models` hoặc auto-update refetch danh sách model.
 - Nếu sửa tay file này, chạy `/reload` trong Pi để áp dụng.
 
 ### `~/.config/pi-provider-manager/config.json` — cấu hình plugin
@@ -109,6 +112,8 @@ chmod 600 ~/.pi/agent/models.json ~/.config/pi-provider-manager/config.json
 
 | Vấn đề | Cách xử lý |
 |--------|-----------|
+| **HTTP 422 `messages[0].role: unknown variant \`developer\``** | Pi gửi system prompt với role `developer` cho reasoning model; GLM/Z.AI, DeepSeek, Moonshot và relay chỉ nhận `system`. Chạy `/provider edit <name>` → chọn **System role**, hoặc thêm `"compat": { "supportsDeveloperRole": false }` vào provider trong `models.json` rồi `/reload` |
+| HTTP 422/thiếu `max_completion_tokens` | Endpoint dùng `max_tokens`: thêm `"compat": { "maxTokensField": "max_tokens" }` |
 | Fetch model list fail (sai URL/key, mạng) | Plugin báo warning và cho nhập model id tay (comma-separated) |
 | API không hỗ trợ `/v1/models` | Nhập model id tay hoặc sửa JSON trong editor |
 | Sửa tay `models.json` không thấy đổi | Chạy `/reload` trong Pi |

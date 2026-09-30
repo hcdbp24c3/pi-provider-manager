@@ -4,9 +4,9 @@ import {
   loadModelsFile, saveModelsFile, loadPluginConfig,
   addProvider, updateProvider, removeProvider, listProviders,
   validateProviderName, normalizeBaseUrl,
-  type ModelsFile, type ProviderConfig, type ModelEntry, type ApiMode,
+  type ModelsFile, type ProviderConfig, type ModelEntry, type ApiMode, type CompatFlags,
 } from "./config.ts";
-import { fetchModels, buildProviderModels } from "./models.ts";
+import { fetchModels, buildProviderModels, mergeFetchedModels } from "./models.ts";
 
 export const API_MODES: Array<{ value: ApiMode; label: string }> = [
   { value: "openai-completions", label: "OpenAI Chat Completions (compatible)" },
@@ -50,13 +50,40 @@ export async function getProviderArgumentCompletions(argumentPrefix: string, fil
   return null;
 }
 
+const SYSTEM_ROLE_OPTION = "System role";
+const DEVELOPER_ROLE_OPTION = "Developer role (OpenAI default)";
+
+/** Only the OpenAI-shaped APIs carry an instruction role at all. */
+function hasInstructionRole(api: ApiMode): boolean {
+  return api === "openai-completions" || api === "openai-responses";
+}
+
+/**
+ * GLM (Z.AI), DeepSeek and most relay gateways only accept
+ * system|user|assistant|tool, but Pi sends the instruction message as role
+ * "developer" for reasoning models unless told otherwise — such a request is
+ * rejected up front with HTTP 422 "unknown variant `developer`".
+ */
+async function pickInstructionRole(
+  ctx: ExtensionCommandContext,
+  current?: CompatFlags,
+): Promise<CompatFlags | undefined> {
+  const usesSystemRole = current?.supportsDeveloperRole === false;
+  const choice = await ctx.ui.select("Instruction role (system vs developer):", [
+    usesSystemRole ? `${SYSTEM_ROLE_OPTION} (current)` : SYSTEM_ROLE_OPTION,
+    usesSystemRole ? DEVELOPER_ROLE_OPTION : `${DEVELOPER_ROLE_OPTION} (current)`,
+  ]);
+  if (!choice) return current; // cancelled → keep current
+  return { ...current, supportsDeveloperRole: !choice.startsWith(SYSTEM_ROLE_OPTION) };
+}
+
 export function applyProvider(pi: ExtensionAPI, name: string, provider: ProviderConfig): void {
   pi.registerProvider(name, {
     name,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey, // undefined = keyless; do NOT pass "" (Pi treats "" as a configured key)
     api: provider.api,
-    models: buildProviderModels(provider.models ?? []),
+    models: buildProviderModels(provider.models ?? [], provider.compat),
   });
 }
 
@@ -164,7 +191,8 @@ export async function cmdAdd(pi: ExtensionAPI, nameArg: string, ctx: ExtensionCo
     ctx.ui.notify("Provider added with 0 models — run /provider update-models later to fetch them.", "warning");
   }
 
-  const provider: ProviderConfig = { baseUrl, api, apiKey, models };
+  const compat = hasInstructionRole(api) ? await pickInstructionRole(ctx) : undefined;
+  const provider: ProviderConfig = { baseUrl, api, apiKey, compat, models };
   saveModelsFile(addProvider(file, name, provider));
   applyProvider(pi, name, provider);
   ctx.ui.notify(`Added provider "${name}" (${models.length} models). Available in /model now.`, "info");
@@ -222,7 +250,7 @@ export async function cmdEdit(pi: ExtensionAPI, nameArg: string, ctx: ExtensionC
   if (refetch) {
     try {
       const fetched = await fetchModels(baseUrl, apiKey, AbortSignal.timeout(15000));
-      if (fetched.length > 0) models = fetched;
+      if (fetched.length > 0) models = mergeFetchedModels(existing.models ?? [], fetched);
       else ctx.ui.notify("No models returned; keeping existing list.", "warning");
     } catch (err) {
       ctx.ui.notify(`Fetch failed, keeping existing list: ${(err as Error).message}`, "warning");
@@ -240,7 +268,11 @@ export async function cmdEdit(pi: ExtensionAPI, nameArg: string, ctx: ExtensionC
     }
   }
 
-  const provider: ProviderConfig = { baseUrl, api: api ?? existing.api, apiKey, models };
+  const finalApi = api ?? existing.api;
+  const compat = hasInstructionRole(finalApi)
+    ? await pickInstructionRole(ctx, existing.compat)
+    : existing.compat;
+  const provider: ProviderConfig = { baseUrl, api: finalApi, apiKey, compat, models };
   saveModelsFile(updateProvider(file, name, provider));
   applyProvider(pi, name, provider);
   ctx.ui.notify(`Updated provider "${name}" (${models.length} models).`, "info");
@@ -289,7 +321,7 @@ export async function cmdUpdateModels(
   const provider = file.providers[name];
   if (!provider) { ctx.ui.notify(`Provider "${name}" not found.`, "error"); return; }
   try {
-    const models = await fetcher(provider.baseUrl, provider.apiKey, AbortSignal.timeout(15000));
+    const models = mergeFetchedModels(provider.models ?? [], await fetcher(provider.baseUrl, provider.apiKey, AbortSignal.timeout(15000)));
     if (models.length === 0) { ctx.ui.notify("No models returned; keeping existing list.", "warning"); return; }
     const updated = { ...provider, models };
     saveModelsFile(updateProvider(file, name, updated), deps.filePath);
@@ -310,7 +342,10 @@ async function updateAllProviders(pi: ExtensionAPI, ctx: ExtensionCommandContext
   const failed: string[] = [];
   await Promise.allSettled(entries.map(async ({ name, provider }) => {
     try {
-      const models = await fetcher(provider.baseUrl, provider.apiKey, AbortSignal.timeout(15000));
+      const models = mergeFetchedModels(
+        provider.models ?? [],
+        await fetcher(provider.baseUrl, provider.apiKey, AbortSignal.timeout(15000)),
+      );
       if (models.length === 0) throw new Error("no models returned");
       working.providers[name] = { ...provider, models };
       applyProvider(pi, name, working.providers[name]);
@@ -341,8 +376,8 @@ export async function autoUpdateProviders(pi: ExtensionAPI, ctx: ExtensionContex
   await Promise.allSettled(entries.map(async ({ name, provider }) => {
     if (cfg.providers[name]?.autoUpdate === false) return;
     try {
-      const models = await fetchModels(provider.baseUrl, provider.apiKey, AbortSignal.timeout(10000));
-      // Compare by model-id set only — preserves manual edits (contextWindow, maxTokens, ...)
+      const models = mergeFetchedModels(provider.models ?? [], await fetchModels(provider.baseUrl, provider.apiKey, AbortSignal.timeout(10000)));
+      // Compare by model-id set only — metadata edits stay as the user left them (mergeFetchedModels)
       const oldIds = (provider.models ?? []).map((m) => m.id).sort().join("\n");
       const newIds = models.map((m) => m.id).sort().join("\n");
       if (oldIds !== newIds) {
